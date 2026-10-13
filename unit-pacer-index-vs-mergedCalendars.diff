@@ -1,0 +1,1663 @@
+--- mergedCalendars/index.html	2026-10-13 09:08:27.445550338 -0400
++++ unit-pacer/index.html	2026-10-13 09:32:05.643762156 -0400
+@@ -1,7 +1,7 @@
+ <!DOCTYPE html>
+ <head>
+   <meta charset="UTF-8" />
+-  <title>HS Faculty Planner</title>
++  <title>Unit Pacer — Unit &amp; Lesson Planner</title>
+   <style>
+ .homework {
+   display: block;
+@@ -1876,14 +1876,14 @@
+         <select id="profileSelect" class="header-select">...</select>
+ 
+ 
+-                <h1 id="mainTitle">Wesleyan HS 26-27 Planner</h1>
+-                <select id="divisionSelector" aria-label="Division selector">
++                <h1 id="mainTitle">Unit Pacer</h1>
++                <select id="divisionSelector" aria-label="Division selector" hidden>
+           <option value="hs">High School</option>
+           <option value="ms">Middle School</option>
+           <option value="ls">Lower School</option>
+           <option value="other">Other</option>
+         </select>
+-        <select id="semesterSelector" aria-label="Semester selector">
++        <select id="semesterSelector" aria-label="Semester selector" hidden>
+           <option value="sem1">1st Semester</option>
+           <option value="sem2">2nd Semester</option>
+         </select>
+@@ -1892,7 +1892,7 @@
+           <summary>⚙️ Calendar settings</summary>
+           <div class="header-settings-body">
+ 
+-            <div class="selector-group">
++            <div class="selector-group" hidden>
+ 
+               <div>
+                 <strong>Division:</strong>
+@@ -2045,7 +2045,7 @@
+         <div style="margin-top:12px;">
+           <label>Calendar
+             <select id="packSelect">
+-              <option value="builtin">Wesleyan (built-in HS/MS/LS)</option>
++              <option value="builtin">— No calendar yet —</option>
+             </select>
+           </label>
+           <button type="button" id="packUseBtn">Use this calendar</button>
+@@ -2099,25 +2099,6 @@
+         <span>🎉 Special Days</span>
+       </button>
+       <div class="config-section-body">
+-        <div class="special-color-key" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px; font-size:0.75rem;">
+-          <span style="display:inline-flex; align-items:center; gap:4px;">
+-            <span style="width:12px; height:12px; border-radius:999px; background:#bfdbfe; border:1px solid #93c5fd;"></span>
+-            All-school
+-          </span>
+-          <span style="display:inline-flex; align-items:center; gap:4px;">
+-            <span style="width:12px; height:12px; border-radius:999px; background:#fecdd3; border:1px solid #fda4af;"></span>
+-            High School
+-          </span>
+-          <span style="display:inline-flex; align-items:center; gap:4px;">
+-            <span style="width:12px; height:12px; border-radius:999px; background:#fed7aa; border:1px solid #fdba74;"></span>
+-            Middle School
+-          </span>
+-          <span style="display:inline-flex; align-items:center; gap:4px;">
+-            <span style="width:12px; height:12px; border-radius:999px; background:#bbf7d0; border:1px solid #86efac;"></span>
+-            Lower School
+-          </span>
+-        </div>
+-
+         <div id="specialDaysContainer"></div>
+         <button id="addSpecialDayBtn">+ Add Special Day</button>
+         <div class="small" style="margin-top:0.4rem;">Any row can be removed from this list.</div>
+@@ -2177,6 +2158,42 @@
+ </main>
+ 
+     <script>
++/* Unit Pacer: namespace all localStorage keys. This app may share a browser origin with
++   another planner (e.g. two GitHub Pages repos under the same account), and both use
++   keys like "plannerProfiles". The prefix keeps their data completely separate. */
++const localStorage = (() => {
++  const real = window.localStorage;
++  const P = "unitpacer:";
++  const ownKeys = () => {
++    const out = [];
++    for (let i = 0; i < real.length; i++) {
++      const k = real.key(i);
++      if (k && k.startsWith(P)) out.push(k.slice(P.length));
++    }
++    return out;
++  };
++  const api = {
++    getItem: k => real.getItem(P + k),
++    setItem: (k, v) => real.setItem(P + k, String(v)),
++    removeItem: k => real.removeItem(P + k),
++    key: i => ownKeys()[i] ?? null,
++    clear: () => ownKeys().forEach(k => real.removeItem(P + k))
++  };
++  return new Proxy({}, {
++    get(_, prop) {
++      if (prop === "length") return ownKeys().length;
++      if (prop in api) return api[prop];
++      if (typeof prop !== "string") return undefined;
++      const v = real.getItem(P + prop);
++      return v === null ? undefined : v;
++    },
++    ownKeys: () => ownKeys(),
++    getOwnPropertyDescriptor(_, k) {
++      const v = real.getItem(P + String(k));
++      return v === null ? undefined : { value: v, enumerable: true, configurable: true, writable: true };
++    }
++  });
++})();
+ let savedPacks = JSON.parse(localStorage.getItem("plannerSavedPacks") || "[]");
+ // [{ id, name, start, end, letters, skipWeekends, days }, ...]
+ 
+@@ -2328,7 +2345,7 @@
+ }
+ 
+ function getProfileCalendarLabel() {
+-  if (!activePackId || activePackId === "builtin") return "Built-in Wesleyan";
++  if (!activePackId || activePackId === "builtin") return "No calendar yet";
+   const pack =
+     typeof savedPacks !== "undefined"
+       ? savedPacks.find(p => p.id === activePackId)
+@@ -2473,7 +2490,7 @@
+   const sel = document.getElementById("packSelect");
+   if (!sel) return;
+   sel.innerHTML =
+-    '<option value="builtin">Built-in (HS/MS/LS)</option>' +
++    '<option value="builtin">— No calendar yet —</option>' +
+     savedPacks.map(p =>
+       `<option value="${p.id}">${p.name} (${p.days?.length || 0} days)</option>`
+     ).join("");
+@@ -3198,26 +3215,9 @@
+ 
+ 
+     // --- Rotation rules (HS A–G) ---
+-    const HS_ROTATION_RULES = {
+-      A: [1,2,3,4,5],
+-      B: [6,7,1,2,3],
+-      C: [4,5,6,7,1],
+-      D: [2,3,4,5,6],
+-      E: [7,1,2,3,4],
+-      F: [5,6,7,1,2],
+-      G: [3,4,5,6,7]
+-    };
+-
+-    const MS_ROTATION_RULES = {
+-      A: [1,2,3,4,5,6],
+-      B: [7,1,2,3,4,5],
+-      C: [6,7,1,2,3,4],
+-      D: [5,6,7,1,2,3],
+-      E: [4,5,6,7,1,2],
+-      F: [3,4,5,6,7,1],
+-      G: [2,3,4,5,6,7]
+-    };
+-
++    // School-specific rotation rules removed — every calendar is built by the setup wizard.
++    const HS_ROTATION_RULES = {};
++    const MS_ROTATION_RULES = {};
+     const LS_ROTATION_RULES = {};
+ 
+     // --- Sample calendar data ---
+@@ -3226,25 +3226,8 @@
+ 
+     // Bell times by division + weekday. Values are ordered class slots (1st meeting, 2nd, ...).
+ // Not period numbers — rotation decides which course sits in which slot.
+-const BELL_DEFAULTS = {
+-  hs: {
+-    // Mon, Tue, Thu, Fri — five class blocks
+-    Mon: ["8:10–9:10", "9:15–10:15", "11:10–12:10", "12:50–1:50", "1:55–2:55"],
+-    Tue: ["8:10–9:10", "9:15–10:15", "11:10–12:10", "12:50–1:50", "1:55–2:55"],
+-    Wed: ["8:50–9:50", "9:55–10:55", "11:15–12:15", "12:50–1:50", "1:55–2:55"],
+-    Thu: ["8:10–9:10", "9:15–10:15", "11:10–12:10", "12:50–1:50", "1:55–2:55"],
+-    Fri: ["8:10–9:10", "9:15–10:15", "11:10–12:10", "12:50–1:50", "1:55–2:55"]
+-  },
+-  ms: {
+-    // Six instructional class blocks per day (homeroom/flex/chapel/lunch excluded)
+-    Mon: ["8:10-9:00", "9:10-10:00", "10:25-11:15", "11:55-12:45", "12:55-1:45", "1:50-2:40"],
+-    Tue: ["8:10-9:00", "9:10-10:00", "10:25-11:15", "11:55-12:45", "12:55-1:45", "1:50-2:40"],
+-    Wed: ["8:55-9:45", "9:45-10:35", "10:35-11:25", "12:05-12:55", "12:55-1:45", "1:55-2:45"],
+-    Thu: ["8:05-8:55", "9:35-10:25", "10:25-11:15", "11:55-12:45", "12:55-1:45", "1:50-2:40"],
+-    Fri: ["8:10-9:00", "9:10-10:00", "10:25-11:15", "11:55-12:45", "12:55-1:45", "1:50-2:40"]
+-  },
+-  ls: {}
+-};
++// Bell times start blank; teachers fill them in under Custom calendar → Edit M-F Times.
++const BELL_DEFAULTS = { hs: {}, ms: {}, ls: {} };
+ 
+ let bellTimesByDivision = null;
+ 
+@@ -3299,823 +3282,19 @@
+   return getBellTimeForSlot(isoDate, slotIndex);
+ }
+ 
+-const HS_ROTATION_2026 = [
+-  
+-  { date: "2026-08-13", letter: "*" },
+-  { date: "2026-08-14", letter: "A*" },
+-
+-  { date: "2026-08-17", letter: "B" },
+-  { date: "2026-08-18", letter: "C" },
+-  { date: "2026-08-19", letter: "D" },
+-  { date: "2026-08-20", letter: "E*" },
+-  { date: "2026-08-21", letter: "F" },
+-
+-  { date: "2026-08-24", letter: "G" },
+-  { date: "2026-08-25", letter: "A" },
+-  { date: "2026-08-26", letter: "B" },
+-  { date: "2026-08-27", letter: "C" },
+-  { date: "2026-08-28", letter: "D" },
+-
+-  { date: "2026-08-31", letter: "E" },
+-
+-  { date: "2026-09-01", letter: "F" },
+-  { date: "2026-09-02", letter: "G" },
+-  { date: "2026-09-03", letter: "A" },
+-  { date: "2026-09-04", letter: "B" },
+-
+-  { date: "2026-09-05", letter: "Labor Day"},
+-  { date: "2026-09-06", letter: "Labor Day"},
+-  { date: "2026-09-07", letter: "Labor Day - No school" },
+-
+-  { date: "2026-09-08", letter: "C" },
+-  { date: "2026-09-09", letter: "D" },
+-  { date: "2026-09-10", letter: "E" },
+-  { date: "2026-09-11", letter: "F" },
+-
+-  { date: "2026-09-14", letter: "G" },
+-
+-  { date: "2026-09-15", letter: "A" },
+-  { date: "2026-09-16", letter: "B" },
+-  { date: "2026-09-17", letter: "C" },
+-  { date: "2026-09-18", letter: "D*" },
+-
+-  { date: "2026-09-21", letter: "E" },
+-  { date: "2026-09-22", letter: "F" },
+-  { date: "2026-09-23", letter: "G" },
+-  { date: "2026-09-24", letter: "A" },
+-  { date: "2026-09-25", letter: "B" },
+-
+-  { date: "2026-09-28", letter: "C" },
+-  { date: "2026-09-29", letter: "D" },
+-  { date: "2026-09-30", letter: "E" },
+-
+-  { date: "2026-10-01", letter: "F" },
+-  { date: "2026-10-02", letter: "G" },
+-
+-  { date: "2026-10-05", letter: "A" },
+-  { date: "2026-10-06", letter: "B" },
+-
+-  { date: "2026-10-07", letter: "PSAT - no classes" },     // PSAT day
+-  { date: "2026-10-08", letter: "C" },
+-  { date: "2026-10-09", letter: "D" },
+-  { date: "2026-10-10", letter: "Fall Break" },
+-  { date: "2026-10-11", letter: "Fall Break" },
+-  { date: "2026-10-12", letter: "Fall Break - No school" },
+-  { date: "2026-10-13", letter: "Fall Break - No school" },   // No school
+-
+-  { date: "2026-10-14", letter: "E" },
+-  { date: "2026-10-15", letter: "F" },
+-  { date: "2026-10-16", letter: "G" },
+-
+-  { date: "2026-10-19", letter: "A" },
+-  { date: "2026-10-20", letter: "B" },
+-  { date: "2026-10-21", letter: "C" },
+-  { date: "2026-10-22", letter: "D" },
+-
+-  { date: "2026-10-23", letter: "Homecoming - no classes" },     // Homecoming
+-
+-  { date: "2026-10-26", letter: "E" },
+-  { date: "2026-10-27", letter: "F" },
+-  { date: "2026-10-28", letter: "G" },
+-  { date: "2026-10-29", letter: "A" },
+-  { date: "2026-10-30", letter: "B" },
+-
+-  { date: "2026-11-02", letter: "C" },
+-  { date: "2026-11-03", letter: "D" },
+-  { date: "2026-11-04", letter: "E" },
+-  { date: "2026-11-05", letter: "F" },
+-  { date: "2026-11-06", letter: "G" },
+-
+-  { date: "2026-11-09", letter: "A" },
+-  { date: "2026-11-10", letter: "B*" },
+-  { date: "2026-11-11", letter: "C" },
+-  { date: "2026-11-12", letter: "D" },
+-  { date: "2026-11-13", letter: "E" },
+-
+-  { date: "2026-11-16", letter: "F" },
+-  { date: "2026-11-17", letter: "G" },
+-  { date: "2026-11-18", letter: "A" },
+-  { date: "2026-11-19", letter: "B" },
+-  { date: "2026-11-20", letter: "C" },
+-  { date: "2026-11-21", letter: "Thanksgiving" },
+-  { date: "2026-11-22", letter: "Thanksgiving" },
+-
+-  { date: "2026-11-23", letter: "Thanksgiving - No school" },
+-  { date: "2026-11-24", letter: "Thanksgiving - No school" },
+-  { date: "2026-11-25", letter: "Thanksgiving - No school" },
+-  { date: "2026-11-26", letter: "Thanksgiving - No school" },
+-  { date: "2026-11-27", letter: "Thanksgiving - No school" },
+-
+-  { date: "2026-11-30", letter: "D" },
+-  { date: "2026-12-01", letter: "E" },
+-  { date: "2026-12-02", letter: "F" },
+-  { date: "2026-12-03", letter: "G" },
+-  { date: "2026-12-04", letter: "A" },
+-
+-  { date: "2026-12-07", letter: "B" },
+-  { date: "2026-12-08", letter: "C" },
+-  { date: "2026-12-09", letter: "D" },
+-  { date: "2026-12-10", letter: "Reading Day"},
+-  { date: "2026-12-11", letter: "Reading Day / Stats / CS Exams" },
+-
+-  { date: "2026-12-14", letter: "Science Exam" },
+-  { date: "2026-12-15", letter: "English Exam" },
+-  { date: "2026-12-16", letter: "Social Science Exam" },
+-  { date: "2026-12-17", letter: "Math / Conflict Exam" },
+-  { date: "2026-12-18", letter: "Conflict Exam" },
+-  { date: "2026-12-19", letter: "Christmas Break - No School" },
+-  { date: "2026-12-20", letter: "Christmas Break - No School" },
+-  { date: "2026-12-21", letter: "Christmas Break - No School" },
+-  { date: "2026-12-22", letter: "Christmas Break - No School" },
+-  { date: "2026-12-23", letter: "Christmas Break - No School" },
+-  { date: "2026-12-24", letter: "Christmas Break - No School" },
+-  { date: "2026-12-25", letter: "Christmas Break - No School" },
+-  { date: "2026-12-26", letter: "Christmas Break - No School" },
+-  { date: "2026-12-27", letter: "Christmas Break - No School" },
+-  { date: "2026-12-28", letter: "Christmas Break - No School" },
+-  { date: "2026-12-29", letter: "Christmas Break - No School" },
+-  { date: "2026-12-30", letter: "Christmas Break - No School" },
+-  { date: "2026-12-31", letter: "Christmas Break - No School" },
+-  { date: "2027-01-01", letter: "Christmas Break - No School" },
+-  { date: "2027-01-02", letter: "Christmas Break - No School" },
+-  { date: "2027-01-03", letter: "Christmas Break - No School" },
+-  
+-  { date: "2027-01-04", letter: "A"},
+-  { date: "2027-01-05", letter: "B"},
+-  { date: "2027-01-06", letter: "C"},
+-  { date: "2027-01-07", letter: "D"},
+-  { date: "2027-01-08", letter: "E"},
+-  
+-  { date: "2027-01-11", letter: "F"},
+-  { date: "2027-01-12", letter: "G"},
+-  { date: "2027-01-13", letter: "A"},
+-  { date: "2027-01-14", letter: "B"},
+-  { date: "2027-01-15", letter: "C"},
+-  
+-  { date: "2027-01-18", letter: "MLK Holiday - No School"},
+-  { date: "2027-01-19", letter: "D"},
+-  { date: "2027-01-20", letter: "E"},
+-  { date: "2027-01-21", letter: "F"},
+-  { date: "2027-01-22", letter: "G"},
+-  
+-  { date: "2027-01-25", letter: "A"},
+-  { date: "2027-01-26", letter: "B"},
+-  { date: "2027-01-27", letter: "C"},
+-  { date: "2027-01-28", letter: "D"},
+-  { date: "2027-01-29", letter: "E"},
+-
+-  { date: "2027-02-01", letter: "F"},
+-  { date: "2027-02-02", letter: "G"},
+-  { date: "2027-02-03", letter: "A"},
+-  { date: "2027-02-04", letter: "B"},
+-  { date: "2027-02-05", letter: "C*"},
+-
+-  { date: "2027-02-08", letter: "D"},
+-  { date: "2027-02-09", letter: "E"},
+-  { date: "2027-02-10", letter: "F"},
+-  { date: "2027-02-11", letter: "G"},
+-  { date: "2027-02-12", letter: "A"},
+-  { date: "2027-02-13", letter: "Winter Break"},
+-  { date: "2027-02-14", letter: "Winter Break"},
+-
+-  { date: "2027-02-15", letter: "Winter Break - No School"},
+-  { date: "2027-02-16", letter: "Winter Break - No School"},
+-  { date: "2027-02-17", letter: "B"},
+-  { date: "2027-02-18", letter: "C"},
+-  { date: "2027-02-19", letter: "D*"},
+-
+-  { date: "2027-02-22", letter: "E"},
+-  { date: "2027-02-23", letter: "F"},
+-  { date: "2027-02-24", letter: "G"},
+-  { date: "2027-02-25", letter: "A"},
+-  { date: "2027-02-26", letter: "B"},
+-
+-  { date: "2027-03-01", letter: "C"},
+-  { date: "2027-03-02", letter: "D"},
+-  { date: "2027-03-03", letter: "E"},
+-  { date: "2027-03-04", letter: "F"},
+-  { date: "2027-03-05", letter: "*"},
+-
+-  { date: "2027-03-06", letter: "Spring Break"},
+-  { date: "2027-03-07", letter: "Spring Break"},
+-  { date: "2027-03-08", letter: "Spring Break - No School"},
+-  { date: "2027-03-09", letter: "Spring Break - No School"},
+-  { date: "2027-03-10", letter: "Spring Break - No School"},
+-  { date: "2027-03-11", letter: "Spring Break - No School"},
+-  { date: "2027-03-12", letter: "Spring Break - No School"},
+-  { date: "2027-03-13", letter: "Spring Break"},
+-  { date: "2027-03-14", letter: "Spring Break"},
+-  { date: "2027-03-15", letter: "Spring Break - No School"},
+-
+-  { date: "2027-03-16", letter: "B*"},
+-  { date: "2027-03-17", letter: "C"},
+-  { date: "2027-03-18", letter: "D*"},
+-  { date: "2027-03-19", letter: "E*"},
+-  
+-  { date: "2027-03-22", letter: "F*"},
+-  { date: "2027-03-23", letter: "G*"},
+-  { date: "2027-03-24", letter: "A"},
+-  { date: "2027-03-25", letter: "*"},
+-  { date: "2027-03-26", letter: "Easter Break - No School"},
+-  { date: "2027-03-27", letter: "Easter Break"},
+-  { date: "2027-03-28", letter: "Easter Break"},
+-  
+-  { date: "2027-03-29", letter: "Easter Break - No School"},
+-  { date: "2027-03-30", letter: "G*"},
+-  { date: "2027-03-31", letter: "A"},
+-  { date: "2027-04-01", letter: "B"},
+-  { date: "2027-04-02", letter: "C"},
+-
+-  { date: "2027-04-05", letter: "D"},
+-  { date: "2027-04-06", letter: "E"},
+-  { date: "2027-04-07", letter: "F"},
+-  { date: "2027-04-08", letter: "G"},
+-  { date: "2027-04-09", letter: "A"},
+-
+-  { date: "2027-04-12", letter: "B"},
+-  { date: "2027-04-13", letter: "C"},
+-  { date: "2027-04-14", letter: "D"},
+-  { date: "2027-04-15", letter: "E"},
+-  { date: "2027-04-16", letter: "F*"},
+-  { date: "2027-04-17", letter: "Spring Holiday"},
+-
+-  { date: "2027-04-18", letter: "Spring Holiday"},
+-  { date: "2027-04-19", letter: "Spring Holiday - No School"},
+-  { date: "2027-04-20", letter: "G"},
+-  { date: "2027-04-21", letter: "A"},
+-  { date: "2027-04-22", letter: "B"},
+-  { date: "2027-04-23", letter: "C"},
+-
+-  { date: "2027-04-26", letter: "D"},
+-  { date: "2027-04-27", letter: "E*"},
+-  { date: "2027-04-28", letter: "F"},
+-  { date: "2027-04-29", letter: "G*"},
+-  { date: "2027-04-30", letter: "A*"},
+-
+-  { date: "2027-05-03", letter: "B"},
+-  { date: "2027-05-04", letter: "C"},
+-  { date: "2027-05-05", letter: "D"},
+-  { date: "2027-05-06", letter: "E*"},
+-  { date: "2027-05-07", letter: "F"},
+-
+-  { date: "2027-05-10", letter: "G"},
+-  { date: "2027-05-11", letter: "A"},
+-  { date: "2027-05-12", letter: "B"},
+-  { date: "2027-05-13", letter: "C"},
+-  { date: "2027-05-14", letter: "Reading Day"},
+-
+-  { date: "2027-05-17", letter: "Math Exam"},
+-  { date: "2027-05-18", letter: "Science Exam"},
+-  { date: "2027-05-19", letter: "English Exam"},
+-  { date: "2027-05-20", letter: "Social Science / Conflict Exam "},
+-  { date: "2027-05-21", letter: "Conflict Exam"},
+-  { date: "2027-05-22", letter: "Commencement"},
+-
+-];
+-
+-const MS_ROTATION_2026 = [
+-  { date: "2026-08-12", letter: "*" },
+-  { date: "2026-08-13", letter: "A*" },
+-  { date: "2026-08-14", letter: "B" },
+-
+-  { date: "2026-08-17", letter: "C" },
+-  { date: "2026-08-18", letter: "D" },
+-  { date: "2026-08-19", letter: "E" },
+-  { date: "2026-08-20", letter: "F*" },
+-  { date: "2026-08-21", letter: "G" },
+-
+-  { date: "2026-08-24", letter: "A" },
+-  { date: "2026-08-25", letter: "B" },
+-  { date: "2026-08-26", letter: "C" },
+-  { date: "2026-08-27", letter: "D" },
+-  { date: "2026-08-28", letter: "E" },
+-
+-  { date: "2026-08-31", letter: "F" },
+-  { date: "2026-09-01", letter: "G" },
+-  { date: "2026-09-02", letter: "A" },
+-  { date: "2026-09-03", letter: "B" },
+-  { date: "2026-09-04", letter: "C" },
+-  { date: "2026-09-05", letter: "Labor Day"},
+-  { date: "2026-09-06", letter: "Labor Day"},
+-  { date: "2026-09-07", letter: "Labor Day - No school" },
+-  { date: "2026-09-08", letter: "D" },
+-  { date: "2026-09-09", letter: "E" },
+-  { date: "2026-09-10", letter: "F*" },
+-  { date: "2026-09-11", letter: "F*" },
+-
+-  { date: "2026-09-14", letter: "G" },
+-  { date: "2026-09-15", letter: "MS Retreat" },
+-  { date: "2026-09-16", letter: "MS Retreat" },
+-  { date: "2026-09-17", letter: "A" },
+-  { date: "2026-09-18", letter: "B*" },
+-
+-  { date: "2026-09-21", letter: "C" },
+-  { date: "2026-09-22", letter: "D" },
+-  { date: "2026-09-23", letter: "E" },
+-  { date: "2026-09-24", letter: "F" },
+-  { date: "2026-09-25", letter: "G" },
+-
+-  { date: "2026-09-28", letter: "A" },
+-  { date: "2026-09-29", letter: "B" },
+-  { date: "2026-09-30", letter: "C" },
+-  { date: "2026-10-01", letter: "D" },
+-  { date: "2026-10-02", letter: "E" },
+-
+-  { date: "2026-10-05", letter: "F" },
+-  { date: "2026-10-06", letter: "G" },
+-  { date: "2026-10-07", letter: "A" },
+-  { date: "2026-10-08", letter: "B" },
+-  { date: "2026-10-09", letter: "C*" },
+-  { date: "2026-10-10", letter: "Fall Break" },
+-  { date: "2026-10-11", letter: "Fall Break" },
+-  { date: "2026-10-12", letter: "Fall Break - No school" },
+-  { date: "2026-10-13", letter: "Fall Break - No school" },
+-  { date: "2026-10-14", letter: "D" },
+-  { date: "2026-10-15", letter: "E" },
+-  { date: "2026-10-16", letter: "F" },
+-
+-  { date: "2026-10-19", letter: "G" },
+-  { date: "2026-10-20", letter: "A" },
+-  { date: "2026-10-21", letter: "B" },
+-  { date: "2026-10-22", letter: "C" },
+-  { date: "2026-10-23", letter: "D*" },
+-
+-  { date: "2026-10-26", letter: "E" },
+-  { date: "2026-10-27", letter: "F" },
+-  { date: "2026-10-28", letter: "G" },
+-  { date: "2026-10-29", letter: "A" },
+-  { date: "2026-10-30", letter: "B" },
+-
+-  { date: "2026-11-02", letter: "C" },
+-  { date: "2026-11-03", letter: "D*" },
+-  { date: "2026-11-04", letter: "E" },
+-  { date: "2026-11-05", letter: "F" },
+-  { date: "2026-11-06", letter: "G*" },
+-
+-  { date: "2026-11-09", letter: "A" },
+-  { date: "2026-11-10", letter: "B*" },
+-  { date: "2026-11-11", letter: "C" },
+-  { date: "2026-11-12", letter: "D" },
+-  { date: "2026-11-13", letter: "E" },
+-
+-  { date: "2026-11-16", letter: "F" },
+-  { date: "2026-11-17", letter: "G" },
+-  { date: "2026-11-18", letter: "A" },
+-  { date: "2026-11-19", letter: "B" },
+-  { date: "2026-11-20", letter: "C*" },
+-
+-  { date: "2026-11-21", letter: "Thanksgiving" },
+-  { date: "2026-11-22", letter: "Thanksgiving" },
+-
+-  { date: "2026-11-23", letter: "Thanksgiving - No school" },
+-  { date: "2026-11-24", letter: "Thanksgiving - No school" },
+-  { date: "2026-11-25", letter: "Thanksgiving - No school" },
+-  { date: "2026-11-26", letter: "Thanksgiving - No school" },
+-  { date: "2026-11-27", letter: "Thanksgiving - No school" },
+-
+-
+-  { date: "2026-11-30", letter: "D*" },
+-  { date: "2026-12-01", letter: "E" },
+-  { date: "2026-12-02", letter: "F" },
+-  { date: "2026-12-03", letter: "G" },
+-  { date: "2026-12-04", letter: "A*" },
+-
+-  { date: "2026-12-07", letter: "B" },
+-  { date: "2026-12-08", letter: "C" },
+-  { date: "2026-12-09", letter: "D" },
+-  { date: "2026-12-10", letter: "E" },
+-  { date: "2026-12-11", letter: "F" },
+-
+-  { date: "2026-12-14", letter: "G*" },
+-  { date: "2026-12-15", letter: "A*" },
+-  { date: "2026-12-16", letter: "*" },
+-  { date: "2026-12-17", letter: "*" },
+-  { date: "2026-12-18", letter: "Christmas Break - No School" },
+-  { date: "2026-12-19", letter: "Christmas Break - No School" },
+-  { date: "2026-12-20", letter: "Christmas Break - No School" },
+-  { date: "2026-12-21", letter: "Christmas Break - No School" },
+-  { date: "2026-12-22", letter: "Christmas Break - No School" },
+-  { date: "2026-12-23", letter: "Christmas Break - No School" },
+-  { date: "2026-12-24", letter: "Christmas Break - No School" },
+-  { date: "2026-12-25", letter: "Christmas Break - No School" },
+-  { date: "2026-12-26", letter: "Christmas Break - No School" },
+-  { date: "2026-12-27", letter: "Christmas Break - No School" },
+-  { date: "2026-12-28", letter: "Christmas Break - No School" },
+-  { date: "2026-12-29", letter: "Christmas Break - No School" },
+-  { date: "2026-12-30", letter: "Christmas Break - No School" },
+-  { date: "2026-12-31", letter: "Christmas Break - No School" },
+-  { date: "2027-01-01", letter: "Christmas Break - No School" },
+-  { date: "2027-01-02", letter: "Christmas Break - No School" },
+-  { date: "2027-01-03", letter: "Christmas Break - No School" },
+-
+-  { date: "2027-01-04", letter: "A"},
+-  { date: "2027-01-05", letter: "B"},
+-  { date: "2027-01-06", letter: "C"},
+-  { date: "2027-01-07", letter: "D"},
+-  { date: "2027-01-08", letter: "E"},
+-  
+-  { date: "2027-01-11", letter: "F"},
+-  { date: "2027-01-12", letter: "G"},
+-  { date: "2027-01-13", letter: "A"},
+-  { date: "2027-01-14", letter: "B"},
+-  { date: "2027-01-15", letter: "C"},
+-  
+-  { date: "2027-01-18", letter: "MLK Holiday - No School"},
+-  { date: "2027-01-19", letter: "D"},
+-  { date: "2027-01-20", letter: "E"},
+-  { date: "2027-01-21", letter: "F"},
+-  { date: "2027-01-22", letter: "G"},
+-  
+-  { date: "2027-01-25", letter: "A"},
+-  { date: "2027-01-26", letter: "B"},
+-  { date: "2027-01-27", letter: "C"},
+-  { date: "2027-01-28", letter: "D"},
+-  { date: "2027-01-29", letter: "E*"},
+-
+-  { date: "2027-02-01", letter: "F"},
+-  { date: "2027-02-02", letter: "G"},
+-  { date: "2027-02-03", letter: "A"},
+-  { date: "2027-02-04", letter: "B"},
+-  { date: "2027-02-05", letter: "C*"},
+-
+-  { date: "2027-02-08", letter: "D"},
+-  { date: "2027-02-09", letter: "E"},
+-  { date: "2027-02-10", letter: "F"},
+-  { date: "2027-02-11", letter: "G"},
+-  { date: "2027-02-12", letter: "A"},
+-  { date: "2027-02-13", letter: "Winter Break"},
+-  { date: "2027-02-14", letter: "Winter Break"},
+-
+-  { date: "2027-02-15", letter: "Winter Break - No School"},
+-  { date: "2027-02-16", letter: "Winter Break - No School"},
+-  { date: "2027-02-17", letter: "B"},
+-  { date: "2027-02-18", letter: "C"},
+-  { date: "2027-02-19", letter: "D"},
+-
+-  { date: "2027-02-22", letter: "E"},
+-  { date: "2027-02-23", letter: "F"},
+-  { date: "2027-02-24", letter: "G"},
+-  { date: "2027-02-25", letter: "A"},
+-  { date: "2027-02-26", letter: "B*"},
+-
+-  { date: "2027-03-01", letter: "C"},
+-  { date: "2027-03-02", letter: "D"},
+-  { date: "2027-03-03", letter: "E"},
+-  { date: "2027-03-04", letter: "F*"},
+-  { date: "2027-03-05", letter: "G*"},
+-
+-  { date: "2027-03-06", letter: "Spring Break"},
+-  { date: "2027-03-07", letter: "Spring Break"},
+-  { date: "2027-03-08", letter: "Spring Break - No School"},
+-  { date: "2027-03-09", letter: "Spring Break - No School"},
+-  { date: "2027-03-10", letter: "Spring Break - No School"},
+-  { date: "2027-03-11", letter: "Spring Break - No School"},
+-  { date: "2027-03-12", letter: "Spring Break - No School"},
+-  { date: "2027-03-13", letter: "Spring Break"},
+-  { date: "2027-03-14", letter: "Spring Break"},
+-  { date: "2027-03-15", letter: "Spring Break - No School"},
+-
+-  { date: "2027-03-16", letter: "A"},
+-  { date: "2027-03-17", letter: "B"},
+-  { date: "2027-03-18", letter: "C*"},
+-  { date: "2027-03-19", letter: "D"},
+-  
+-  { date: "2027-03-22", letter: "E"},
+-  { date: "2027-03-23", letter: "F*"},
+-  { date: "2027-03-24", letter: "G"},
+-  { date: "2027-03-25", letter: "A*"},
+-  { date: "2027-03-26", letter: "Easter Break - No School"},
+-  { date: "2027-03-27", letter: "Easter Break"},
+-  { date: "2027-03-28", letter: "Easter Break"},
+-  
+-  { date: "2027-03-29", letter: "Easter Break - No School"},
+-  { date: "2027-03-30", letter: "B"},
+-  { date: "2027-03-31", letter: "C"},
+-  { date: "2027-04-01", letter: "D"},
+-  { date: "2027-04-02", letter: "E*"},
+-
+-  { date: "2027-04-05", letter: "F"},
+-  { date: "2027-04-06", letter: "G"},
+-  { date: "2027-04-07", letter: "A"},
+-  { date: "2027-04-08", letter: "B"},
+-  { date: "2027-04-09", letter: "*"},
+-
+-  { date: "2027-04-12", letter: "C"},
+-  { date: "2027-04-13", letter: "D"},
+-  { date: "2027-04-14", letter: "E"},
+-  { date: "2027-04-15", letter: "F"},
+-  { date: "2027-04-16", letter: "G*"},
+-  { date: "2027-04-17", letter: "Spring Holiday"},
+-
+-  { date: "2027-04-18", letter: "Spring Holiday"},
+-  { date: "2027-04-19", letter: "Spring Holiday - No School"},
+-  { date: "2027-04-20", letter: "A"},
+-  { date: "2027-04-21", letter: "B"},
+-  { date: "2027-04-22", letter: "C"},
+-  { date: "2027-04-23", letter: "D"},
+-
+-  { date: "2027-04-26", letter: "E*"},
+-  { date: "2027-04-27", letter: "F*"},
+-  { date: "2027-04-28", letter: "G"},
+-  { date: "2027-04-29", letter: "A*"},
+-  { date: "2027-04-30", letter: "B"},
+-
+-  { date: "2027-05-03", letter: "C*"},
+-  { date: "2027-05-04", letter: "D"},
+-  { date: "2027-05-05", letter: "E"},
+-  { date: "2027-05-06", letter: "F*"},
+-  { date: "2027-05-07", letter: "G"},
+-
+-  { date: "2027-05-10", letter: "A"},
+-  { date: "2027-05-11", letter: "B"},
+-  { date: "2027-05-12", letter: "C"},
+-  { date: "2027-05-13", letter: "D*"},
+-  { date: "2027-05-14", letter: "E*"},
+-
+-  { date: "2027-05-17", letter: "F*"},
+-  { date: "2027-05-18", letter: "G*"},
+-  { date: "2027-05-19", letter: "*"},
+-  { date: "2027-05-20", letter: "*"},
+-  { date: "2027-05-21", letter: "No School"},
+-  { date: "2027-05-22", letter: "Commencement"},
+-
+-];
+-
+-const LS_ROTATION_2026 = [
+-  { date: "2026-08-12", letter: "A" },
+-  { date: "2026-08-13", letter: "A" },
+-  { date: "2026-08-14", letter: "B" },
+-  { date: "2026-08-17", letter: "C" },
+-  { date: "2026-08-18", letter: "D" },
+-  { date: "2026-08-19", letter: "" },
+-  { date: "2026-08-20", letter: "A" },
+-  { date: "2026-08-21", letter: "B" },
+-  { date: "2026-08-24", letter: "C" },
+-  { date: "2026-08-25", letter: "D" },
+-  { date: "2026-08-26", letter: "" },
+-  { date: "2026-08-27", letter: "A" },
+-  { date: "2026-08-28", letter: "B" },
+-  { date: "2026-08-31", letter: "C" },
+-  { date: "2026-09-01", letter: "D" },
+-  { date: "2026-09-02", letter: "" },
+-  { date: "2026-09-03", letter: "A" },
+-  { date: "2026-09-04", letter: "B" },
+-  { date: "2026-09-05", letter: "Labor Day"},
+-  { date: "2026-09-06", letter: "Labor Day"},
+-  { date: "2026-09-07", letter: "Labor Day - No school" },
+-  { date: "2026-09-08", letter: "C" },
+-  { date: "2026-09-09", letter: "" },
+-  { date: "2026-09-10", letter: "D" },
+-  { date: "2026-09-11", letter: "A" },
+-  { date: "2026-09-14", letter: "B" },
+-  { date: "2026-09-15", letter: "C" },
+-  { date: "2026-09-16", letter: "" },
+-  { date: "2026-09-17", letter: "D" },
+-  { date: "2026-09-18", letter: "A" },
+-  { date: "2026-09-21", letter: "B" },
+-  { date: "2026-09-22", letter: "C" },
+-  { date: "2026-09-23", letter: "" },
+-  { date: "2026-09-24", letter: "D" },
+-  { date: "2026-09-25", letter: "A" },
+-  { date: "2026-09-28", letter: "B" },
+-  { date: "2026-09-29", letter: "C" },
+-  { date: "2026-09-30", letter: "" },
+-  { date: "2026-10-01", letter: "D" },
+-  { date: "2026-10-02", letter: "A" },
+-  { date: "2026-10-05", letter: "B" },
+-  { date: "2026-10-06", letter: "C" },
+-  { date: "2026-10-07", letter: "" },
+-  { date: "2026-10-08", letter: "D" },
+-  { date: "2026-10-09", letter: "*" },
+-  { date: "2026-10-10", letter: "Fall Break" },
+-  { date: "2026-10-11", letter: "Fall Break" },
+-  { date: "2026-10-12", letter: "Fall Break - No school" },
+-  { date: "2026-10-13", letter: "Fall Break - No school" },
+-  { date: "2026-10-14", letter: "" },
+-  { date: "2026-10-15", letter: "A" },
+-  { date: "2026-10-16", letter: "B" },
+-  { date: "2026-10-19", letter: "C" },
+-  { date: "2026-10-20", letter: "D" },
+-  { date: "2026-10-21", letter: "" },
+-  { date: "2026-10-22", letter: "A" },
+-  { date: "2026-10-23", letter: "B" },
+-  { date: "2026-10-26", letter: "C" },
+-  { date: "2026-10-27", letter: "D" },
+-  { date: "2026-10-28", letter: "" },
+-  { date: "2026-10-29", letter: "A" },
+-  { date: "2026-10-30", letter: "*" },
+-  { date: "2026-11-02", letter: "No school - Conference Day" },
+-  { date: "2026-11-03", letter: "B" },
+-  { date: "2026-11-04", letter: "" },
+-  { date: "2026-11-05", letter: "*" },
+-  { date: "2026-11-06", letter: "*" },
+-  { date: "2026-11-09", letter: "C" },
+-  { date: "2026-11-10", letter: "D" },
+-  { date: "2026-11-11", letter: "" },
+-  { date: "2026-11-12", letter: "A" },
+-  { date: "2026-11-13", letter: "B" },
+-  { date: "2026-11-16", letter: "C" },
+-  { date: "2026-11-17", letter: "D" },
+-  { date: "2026-11-18", letter: "" },
+-  { date: "2026-11-19", letter: "A" },
+-  { date: "2026-11-20", letter: "B" },
+-  { date: "2026-11-21", letter: "Thanksgiving" },
+-  { date: "2026-11-22", letter: "Thanksgiving" },
+-
+-  { date: "2026-11-23", letter: "Thanksgiving - No school" },
+-  { date: "2026-11-24", letter: "Thanksgiving - No school" },
+-  { date: "2026-11-25", letter: "Thanksgiving - No school" },
+-  { date: "2026-11-26", letter: "Thanksgiving - No school" },
+-  { date: "2026-11-27", letter: "Thanksgiving - No school" },
+-
+-  { date: "2026-11-30", letter: "C" },
+-  { date: "2026-12-01", letter: "D" },
+-  { date: "2026-12-02", letter: "" },
+-  { date: "2026-12-03", letter: "A" },
+-  { date: "2026-12-04", letter: "B" },
+-  { date: "2026-12-07", letter: "C" },
+-  { date: "2026-12-08", letter: "D" },
+-  { date: "2026-12-09", letter: "" },
+-  { date: "2026-12-10", letter: "A" },
+-  { date: "2026-12-11", letter: "B" },
+-  { date: "2026-12-14", letter: "C" },
+-  { date: "2026-12-15", letter: "D" },
+-  { date: "2026-12-16", letter: "" },
+-  { date: "2026-12-17", letter: "Christmas Break - No School" },
+-  { date: "2026-12-18", letter: "Christmas Break - No School" },
+-  { date: "2026-12-19", letter: "Christmas Break - No School" },
+-  { date: "2026-12-20", letter: "Christmas Break - No School" },
+-  { date: "2026-12-21", letter: "Christmas Break - No School" },
+-  { date: "2026-12-22", letter: "Christmas Break - No School" },
+-  { date: "2026-12-23", letter: "Christmas Break - No School" },
+-  { date: "2026-12-24", letter: "Christmas Break - No School" },
+-  { date: "2026-12-25", letter: "Christmas Break - No School" },
+-  { date: "2026-12-26", letter: "Christmas Break - No School" },
+-  { date: "2026-12-27", letter: "Christmas Break - No School" },
+-  { date: "2026-12-28", letter: "Christmas Break - No School" },
+-  { date: "2026-12-29", letter: "Christmas Break - No School" },
+-  { date: "2026-12-30", letter: "Christmas Break - No School" },
+-  { date: "2026-12-31", letter: "Christmas Break - No School" },
+-
+-
+-  { date: "2027-01-01", letter: "Christmas Break - No School" },
+-  { date: "2027-01-02", letter: "Christmas Break - No School" },
+-  { date: "2027-01-03", letter: "Christmas Break - No School" },
+-
+-  { date: "2027-01-04", letter: "A"},
+-  { date: "2027-01-05", letter: "B"},
+-  { date: "2027-01-06", letter: ""},
+-  { date: "2027-01-07", letter: "C"},
+-  { date: "2027-01-08", letter: "D"},
+-  
+-  { date: "2027-01-11", letter: "A"},
+-  { date: "2027-01-12", letter: "B"},
+-  { date: "2027-01-13", letter: ""},
+-  { date: "2027-01-14", letter: "C"},
+-  { date: "2027-01-15", letter: "D"},
+-  
+-  { date: "2027-01-18", letter: "MLK Holiday - No School"},
+-  { date: "2027-01-19", letter: "A"},
+-  { date: "2027-01-20", letter: ""},
+-  { date: "2027-01-21", letter: "B"},
+-  { date: "2027-01-22", letter: "C"},
+-  
+-  { date: "2027-01-25", letter: "D"},
+-  { date: "2027-01-26", letter: "A"},
+-  { date: "2027-01-27", letter: ""},
+-  { date: "2027-01-28", letter: "B"},
+-  { date: "2027-01-29", letter: "C"},
+-
+-  { date: "2027-02-01", letter: "D"},
+-  { date: "2027-02-02", letter: "A"},
+-  { date: "2027-02-03", letter: ""},
+-  { date: "2027-02-04", letter: "B"},
+-  { date: "2027-02-05", letter: "*"},
+-
+-  { date: "2027-02-08", letter: "C"},
+-  { date: "2027-02-09", letter: "D"},
+-  { date: "2027-02-10", letter: ""},
+-  { date: "2027-02-11", letter: "A"},
+-  { date: "2027-02-12", letter: "B"},
+-  { date: "2027-02-13", letter: "Winter Break"},
+-  { date: "2027-02-14", letter: "Winter Break"},
+-
+-  { date: "2027-02-15", letter: "Winter Break - No School"},
+-  { date: "2027-02-16", letter: "Winter Break - No School"},
+-  { date: "2027-02-17", letter: ""},
+-  { date: "2027-02-18", letter: "C"},
+-  { date: "2027-02-19", letter: "D*"},
+-
+-  { date: "2027-02-22", letter: "A"},
+-  { date: "2027-02-23", letter: "B"},
+-  { date: "2027-02-24", letter: ""},
+-  { date: "2027-02-25", letter: "C"},
+-  { date: "2027-02-26", letter: "Conference Day - No School"},
+-
+-  { date: "2027-03-01", letter: "D"},
+-  { date: "2027-03-02", letter: "A"},
+-  { date: "2027-03-03", letter: ""},
+-  { date: "2027-03-04", letter: "B"},
+-  { date: "2027-03-05", letter: "*"},
+-
+-  { date: "2027-03-06", letter: "Spring Break"},
+-  { date: "2027-03-07", letter: "Spring Break"},
+-  { date: "2027-03-08", letter: "Spring Break - No School"},
+-  { date: "2027-03-09", letter: "Spring Break - No School"},
+-  { date: "2027-03-10", letter: "Spring Break - No School"},
+-  { date: "2027-03-11", letter: "Spring Break - No School"},
+-  { date: "2027-03-12", letter: "Spring Break - No School"},
+-  { date: "2027-03-13", letter: "Spring Break"},
+-  { date: "2027-03-14", letter: "Spring Break"},
+-  { date: "2027-03-15", letter: "Spring Break - No School"},
+-
+-  { date: "2027-03-16", letter: "C"},
+-  { date: "2027-03-17", letter: ""},
+-  { date: "2027-03-18", letter: "D"},
+-  { date: "2027-03-19", letter: "A"},
+-  
+-  { date: "2027-03-22", letter: "B"},
+-  { date: "2027-03-23", letter: "C"},
+-  { date: "2027-03-24", letter: ""},
+-  { date: "2027-03-25", letter: "*"},
+-  { date: "2027-03-26", letter: "Easter Break - No School"},
+-  { date: "2027-03-27", letter: "Easter Break"},
+-  { date: "2027-03-28", letter: "Easter Break"},
+-  
+-  { date: "2027-03-29", letter: "Easter Break - No School"},
+-  { date: "2027-03-30", letter: "D"},
+-  { date: "2027-03-31", letter: ""},
+-  { date: "2027-04-01", letter: "A"},
+-  { date: "2027-04-02", letter: "B"},
+-
+-  { date: "2027-04-05", letter: "C"},
+-  { date: "2027-04-06", letter: "D"},
+-  { date: "2027-04-07", letter: ""},
+-  { date: "2027-04-08", letter: "A"},
+-  { date: "2027-04-09", letter: "B"},
+-
+-  { date: "2027-04-12", letter: "C"},
+-  { date: "2027-04-13", letter: "D"},
+-  { date: "2027-04-14", letter: ""},
+-  { date: "2027-04-15", letter: "A"},
+-  { date: "2027-04-16", letter: "B"},
+-  { date: "2027-04-17", letter: "Spring Holiday"},
+-
+-  { date: "2027-04-18", letter: "Spring Holiday"},
+-  { date: "2027-04-19", letter: "Spring Holiday - No School"},
+-  { date: "2027-04-20", letter: "C"},
+-  { date: "2027-04-21", letter: ""},
+-  { date: "2027-04-22", letter: "D"},
+-  { date: "2027-04-23", letter: "A"},
+-
+-  { date: "2027-04-26", letter: "B"},
+-  { date: "2027-04-27", letter: "C"},
+-  { date: "2027-04-28", letter: ""},
+-  { date: "2027-04-29", letter: "D"},
+-  { date: "2027-04-30", letter: "A"},
+-
+-  { date: "2027-05-03", letter: "B"},
+-  { date: "2027-05-04", letter: "C"},
+-  { date: "2027-05-05", letter: ""},
+-  { date: "2027-05-06", letter: "D"},
+-  { date: "2027-05-07", letter: "A"},
+-
+-  { date: "2027-05-10", letter: "B"},
+-  { date: "2027-05-11", letter: "C"},
+-  { date: "2027-05-12", letter: ""},
+-  { date: "2027-05-13", letter: "D"},
+-  { date: "2027-05-14", letter: "*"},
+-
+-  { date: "2027-05-17", letter: "A"},
+-  { date: "2027-05-18", letter: "*"},
+-  { date: "2027-05-19", letter: ""},
+-  { date: "2027-05-20", letter: "No School"},
+-  { date: "2027-05-21", letter: "No School"},
+-  { date: "2027-05-22", letter: "Commencement"},
+-
+-];
++// No built-in school calendar in the generic planner.
++const HS_ROTATION_2026 = [];
++const MS_ROTATION_2026 = [];
++const LS_ROTATION_2026 = [];
+ 
++// One neutral "division". The key stays "hs" because storage keys and fallbacks use it internally.
+ const DIVISIONS = {
+   hs: {
+     key: "hs",
+-    name: "High School",
++    name: "School",
+     periods: 7,
+     rotationRules: HS_ROTATION_RULES,
+     rotationData: { sem1: HS_ROTATION_2026, sem2: [] }
+-  },
+-  ms: {
+-    key: "ms",
+-    name: "Middle School",
+-    periods: 7,
+-    rotationRules: MS_ROTATION_RULES,
+-    rotationData: { sem1: MS_ROTATION_2026, sem2: [] }
+-  },
+-  ls: {
+-    key: "ls",
+-    name: "Lower School",
+-    periods: 5,
+-    rotationRules: LS_ROTATION_RULES,
+-    rotationData: { sem1: LS_ROTATION_2026, sem2: [] }
+   }
+ };
+ 
+@@ -4125,8 +3304,8 @@
+ };
+ 
+ let hideAllSpecialTags = false;
+-let currentDivision = localStorage.getItem("currentDivision") || "hs";
+-let currentSemester = localStorage.getItem("currentSemester") || "sem1";
++let currentDivision = "hs";   // generic planner: single division
++let currentSemester = "sem1"; // generic planner: one bucket for the whole year
+ let unitsSem1 = {};
+ let unitsSem2 = {};
+ let specialDaysSem1 = [];
+@@ -4460,7 +3639,7 @@
+     const calendarLabel =
+       typeof getProfileCalendarLabel === "function"
+         ? getProfileCalendarLabel()
+-        : (activePackId === "builtin" ? "Built-in Wesleyan" : "Custom pack");
++        : (activePackId === "builtin" ? "No calendar yet" : "Custom pack");
+     const profileName = profile?.name || "Profile";
+     showProfileToast(`Loaded ${profileName} on ${calendarLabel}`);
+   }
+@@ -4774,12 +3953,8 @@
+     return;
+   }
+ 
+-  // Built-in only
+-  if (currentDivision === "hs") titleEl.textContent = "Wesleyan HS 26-27 Planner";
+-  else if (currentDivision === "ms") titleEl.textContent = "Wesleyan MS 26-27 Planner";
+-  else if (currentDivision === "ls") titleEl.textContent = "Wesleyan LS 26-27 Planner";
+-  else if (currentDivision === "other") titleEl.textContent = "Wesleyan Other 26-27 Planner";
+-  else titleEl.textContent = "Planner";
++  // No calendar yet
++  titleEl.textContent = "Unit Pacer";
+ }
+ 
+ function getStorageKey(base) {
+@@ -5108,354 +4283,8 @@
+   return rows;
+ }
+ 
+-const STATIC_SPECIAL_DAY_ROWS = [
+-  ["2026-08-12", ["ls"], "First day (A-K)"],
+-  ["2026-08-12", ["ms"], "First day"],
+-  ["2026-08-13", ["ls"], "First day (L-Z)"],
+-  ["2026-08-13", ["hs"], "First day"],
+-  ["2026-08-17", ["ls"], "Picture Day"],
+-  ["2026-08-18", ["ls"], "Picture Day"],
+-  ["2026-08-18", ["ls"], "Parent Night"],
+-  ["2026-08-19", ["all"], "Late Arrival"],
+-  ["2026-08-20", ["all"], "All School Chapel"],
+-  ["2026-08-20", ["ms"], "Parent Night"],
+-  ["2026-08-25", ["hs"], "Parent Night"],
+-  ["2026-08-26", ["all"], "Late Arrival"],
+-  ["2026-08-27", ["ms"], "Picture Day"],
+-  ["2026-08-31", ["ls"], "Fall Enrichment Begins"],
+-  ["2026-09-02", ["all"], "Late Arrival"],
+-  ["2026-09-03", ["ms"], "CogAT Parent Meeting"],
+-  ["2026-09-03", ["hs"], "Picture Day"],
+-  ["2026-09-03", ["hs"], "CogAT Parent Meeting"],
+-  ["2026-09-09", ["all"], "Late Arrival"],
+-  ["2026-09-10", ["ms"], "CTP Testing (5th-7th)"],
+-  ["2026-09-10", ["ms"], "CTP & CogAT Testing (8th)"],
+-  ["2026-09-11", ["ms"], "CTP Testing (5th-7th)"],
+-  ["2026-09-11", ["ms"], "CTP & CogAT Testing (8th)"],
+-  ["2026-09-11", ["ms"], "1st Grading Period Ends"],
+-  ["2026-09-16", ["hs"], "Late Arrival"],
+-  ["2026-09-17", ["all"], "Family Night"],
+-  ["2026-09-18", ["all"], "Late Arrival"],
+-  ["2026-09-21", ["ls"], "CTP Testing (2nd-4th)"],
+-  ["2026-09-22", ["ls"], "CTP Testing (2nd-4th)"],
+-  ["2026-09-22", ["ls"], "Literacy Night (1st-2nd)"],
+-  ["2026-09-23", ["all"], "Late Arrival"],
+-  ["2026-09-23", ["hs"], "Paying for College Seminar"],
+-  ["2026-09-24", ["ls"], "CTP Testing (2nd-4th)"],
+-  ["2026-09-25", ["ls"], "CTP Testing (2nd-4th)"],
+-  ["2026-09-25", ["ms"], "Fall Play"],
+-  ["2026-09-26", ["ms"], "Fall Play"],
+-  ["2026-09-29", ["ls"], "Passport Club Testing"],
+-  ["2026-09-29", ["ms"], "CTP Parent Meeting (5th-7th)"],
+-  ["2026-09-30", ["all"], "Late Arrival"],
+-  ["2026-09-30", ["hs"], "PreACT (10th-11th)"],
+-  ["2026-10-01", ["ms"], "CogAT & CTP Parent Meeting (8th)"],
+-  ["2026-10-02", ["ls"], "Donuts with Dad"],
+-  ["2026-10-02", ["ms"], "5th & 6th Fall Social"],
+-  ["2026-10-05", ["ms"], "Fall Concert"],
+-  ["2026-10-07", ["all"], "Late Arrival"],
+-  ["2026-10-07", ["hs"], "PSAT (10th-11th)"],
+-  ["2026-10-07", ["hs"], "Grade Level Activities (9th & 12th)"],
+-  ["2026-10-07", ["hs"], "Noon Dismissal"],
+-  ["2026-10-08", ["ls"], "CTP Parent Meeting"],
+-  ["2026-10-09", ["ms"], "2nd Grading Period Ends"],
+-  ["2026-10-09", ["hs"], "2nd Grading Period Ends"],
+-  ["2026-10-14", ["all"], "Late Arrival"],
+-  ["2026-10-16", ["hs"], "Fall Play"],
+-  ["2026-10-17", ["hs"], "Fall Play"],
+-  ["2026-10-19", ["hs"], "Freshman Peer Leaders Night"],
+-  ["2026-10-19", ["ls"], "Fall II Enrichment Begins"],
+-  ["2026-10-21", ["all"], "Late Arrival"],
+-  ["2026-10-22", ["ls"], "Hoedown"],
+-  ["2026-10-22", ["all"], "Family Night"],
+-  ["2026-10-23", ["all"], "Late Arrival"],
+-  ["2026-10-23", ["ms"], "Fall Social (7th-8th)"],
+-  ["2026-10-23", ["hs"], "Homecoming"],
+-  ["2026-10-23", ["hs"], "1:00 Dismissal"],
+-  ["2026-10-24", ["hs"], "Homecoming Dance"],
+-  ["2026-10-26", ["hs"], "Academic Honor Society Induction"],
+-  ["2026-10-26", ["ms"], "Mission Trip Parent and Student Meeting"],
+-  ["2026-10-26", ["hs"], "Mission Trip Parent and Student Meeting"],
+-  ["2026-10-27", ["ls"], "Passport Club Testing"],
+-  ["2026-10-28", ["hs"], "PreSAT/PreACT Parent and Student Meeting (10th-11th)"],
+-  ["2026-10-28", ["all"], "Late Arrival"],
+-  ["2026-10-30", ["ls"], "Book Character Day"],
+-  ["2026-10-30", ["ls"], "Noon Dismissal"],
+-  ["2026-10-30", ["ls"], "First Grading Period Ends"],
+-  
+-  ["2026-11-04", ["hs"], "College Night (11th)"],
+-  ["2026-11-04", ["all"], "Late Arrival"],
+-  ["2026-11-06", ["ls"], "Veterans Day Program"],
+-  ["2026-11-06", ["ms"], "House Spotlight"],
+-  ["2026-11-06", ["ms"], "3rd Grading Period Ends"],
+-  ["2026-11-06", ["hs"], "3rd Grading Period Ends"],
+-  ["2026-11-09", ["ms"], "Missions Trip Student Meeting"],
+-  ["2026-11-09", ["hs"], "Missions Trip Student Meeting"],
+-  ["2026-11-10", ["ms"], "Veterans Day Program"],
+-  ["2026-11-10", ["hs"], "Veterans Day Program"],
+-  ["2026-11-11", ["all"], "Late Arrival"],
+-  ["2026-11-14", ["all"], "Admissions Family Open House"],
+-  ["2026-11-17", ["ls"], "Passport Club Testing"],
+-  ["2026-11-18", ["all"], "Late Arrival"],
+-  ["2026-11-19", ["all"], "Wesley Day"],
+-  ["2026-11-20", ["ms"], "House Challenge"],
+-  ["2026-11-30", ["ms"], "Spelling Bee"],
+-  ["2026-11-30", ["ms"], "Missions Trip Student Meeting"],
+-  ["2026-11-30", ["hs"], "Missions Trip Student Meeting"],
+-  ["2026-12-02", ["all"], "Late Arrival"],
+-  ["2026-12-03", ["ms"], "HS Preview Night"],
+-  ["2026-12-04", ["ms"], "Christmas Rocks"],
+-  ["2026-12-04", ["ls"], "Kindergarten Play"],
+-  ["2026-12-05", ["ls"], "Wolf Cub Player's Musical"],
+-  ["2026-12-06", ["ls"], "Wolf Cub Player's Musical"],
+-  ["2026-12-07", ["ms"], "Chorus Christmas Concert"],
+-  ["2026-12-07", ["hs"], "Chorus Christmas Concert"],
+-  ["2026-12-08", ["ms"], "Exam Review Day (7th-8th)"],
+-  ["2026-12-08", ["ls"], "Passport Club Testing"],
+-  ["2026-12-08", ["ls"], "Parent Christmas Party"],
+-  ["2026-12-09", ["all"], "Late Arrival"],
+-  ["2026-12-09", ["ms"], "Exam Review Day (7th-8th)"],
+-  ["2026-12-09", ["ms"], "Band Christmas Concert"],
+-  ["2026-12-09", ["hs"], "Band Christmas Concert"],
+-  ["2026-12-10", ["hs"], "Late Arrival"],
+-  ["2026-12-10", ["ms"], "Exam Review Day (7th-8th)"],
+-  
+-  ["2026-12-11", ["hs"], "Late Arrival"],
+-  ["2026-12-11", ["ms"], "Exam Review Day (7th-8th)"],
+-  
+-  ["2026-12-11", ["hs"], "12:30 Dismissal"],
+-  ["2026-12-14", ["all"], "Late Arrival"],
+-  ["2026-12-14", ["ms"], "Science Exam (7th-8th)"],
+-  
+-  ["2026-12-15", ["all"], "Late Arrival"],
+-  ["2026-12-15", ["ms"], "Social Science Exam (7th-8th)"],
+-  ["2026-12-16", ["all"], "Late Arrival"],
+-  ["2026-12-16", ["all"], "Faculty Christmas Party"],
+-  ["2026-12-16", ["ls"], "Christmas Parties"],
+-  ["2026-12-16", ["ms"], "Christmas Party (5th-6th)"],
+-  ["2026-12-16", ["ms"], "English Exam (7th-8th)"],
+-  ["2026-12-17", ["ms"], "Late Arrival"],
+-  ["2026-12-17", ["hs"], "Late Arrival"],
+-  ["2026-12-17", ["ms"], "5th & 6th - No School"],
+-  ["2026-12-17", ["ms"], "Math Exam (7th-8th)"],
+-
+-  ["2026-12-18", ["ms"], "Semester Grading Period Ends"],
+-  ["2026-12-18", ["hs"], "Semester Grading Period Ends"],
+-  ["2026-12-18", ["hs"], "Late Arrival"],
+-
+-  ["2027-01-06", ["all"], "Late Arrival"],
+-  ["2027-01-08", ["all"], "Athletic Circle of Honor"],
+-  ["2027-01-09", ["all"], "Admissions Interviews / Testing"],
+-
+-  ["2027-01-09", ["ms"], "Missions Trip Retreat"],
+-  ["2027-01-10", ["ms"], "Missions Trip Retreat"],
+-  ["2027-01-09", ["hs"], "Missions Trip Retreat"],
+-  ["2027-01-10", ["hs"], "Missions Trip Retreat"],
+-  ["2027-01-11", ["ls"], "Winter Enrichment Begins"],
+-  ["2027-01-13", ["all"], "Late Arrival"],
+-  ["2027-01-15", ["hs"], "Christian Life Ski Retreat"],
+-  ["2027-01-16", ["hs"], "Christian Life Ski Retreat"],
+-  ["2027-01-17", ["hs"], "Christian Life Ski Retreat"],
+-  ["2027-01-18", ["hs"], "Christian Life Ski Retreat"],
+-  ["2027-01-20", ["all"], "Late Arrival"],
+-  ["2027-01-23", ["all"], "Admissions Interviews / Testing"],
+-  ["2027-01-26", ["ls"], "Passport Club Testing"],
+-  ["2027-01-27", ["all"], "Late Arrival"],
+-  ["2027-01-27", ["ls"], "3rd Grade Play"],
+-  ["2027-01-29", ["all"], "WPC Red Cross Blood Drive"],
+-  ["2027-01-29", ["ms"], "House Challenge"],
+-  ["2027-01-29", ["ms"], "First Grading Period Ends"],
+-  ["2027-01-29", ["hs"], "First Grading Period Ends"],
+-  ["2027-01-30", ["all"], "Admissions Interviews / Testing"],
+-  ["2027-01-30", ["hs"], "Winter Dance"],
+-  ["2027-02-03", ["all"], "Late Arrival"],
+-  ["2027-02-03", ["hs"], "Winter Musical"],
+-  ["2027-02-04", ["all"], "Family Night"],
+-  ["2027-02-04", ["hs"], "Winter Musical & After Party"],
+-  ["2027-02-05", ["all"], "Late Arrival"],
+-  ["2027-02-05", ["hs"], "Winter Musical"],
+-  ["2027-02-06", ["ls"], "Father / Daughter Dance"],
+-  ["2027-02-06", ["hs"], "Winter Musical"],
+-  ["2027-02-08", ["all"], "Re-Enrollment Contracts Due"],
+-  ["2027-02-08", ["ms"], "Mission Trip Student Meeting"],
+-  ["2027-02-08", ["hs"], "Mission Trip Student Meeting"],
+-  ["2027-02-10", ["all"], "Ash Wednesday Service"],
+-  ["2027-02-10", ["all"], "Late Arrival"],
+-  ["2027-02-10", ["ls"], "1st Grade Play"],
+-  ["2027-02-12", ["ls"], "Second Grading Period Ends"],
+-  ["2027-02-17", ["all"], "Late Arrival"],
+-  ["2027-02-19", ["hs"], "Pep Rally"],
+-  ["2027-02-22", ["ms"], "Mission Trip Parent & Student Meeting"],
+-  ["2027-02-22", ["hs"], "Mission Trip Parent & Student Meeting"],
+-  ["2027-02-23", ["ls"], "Passport Club Testing"],
+-  ["2027-02-24", ["all"], "Late Arrival"],
+-  ["2027-02-24", ["ls"], "4th Grade Businesses of Tomorrow"],
+-  ["2027-02-26", ["ms"], "House Challenge"],
+-  ["2027-02-26", ["ms"], "7th & 8th Grade Spring Social"],
+-  ["2027-02-26", ["ms"], "Mid-Semester Grading Period Ends"],
+-  ["2027-02-26", ["hs"], "Mid-Semester Grading Period Ends"],
+-  ["2027-03-01", ["all"], "Warm Weather Uniform Begins"],
+-  ["2027-03-03", ["all"], "Late Arrival"],
+-  ["2027-03-03", ["ls"], "Pre-First Play"],
+-  ["2027-03-05", ["all"], "Mission Trip Commissioning Service"],
+-  ["2027-03-05", ["ls"], "Noon Dismissal"],
+-  ["2027-03-05", ["ms"], "Noon Dismissal"],
+-  ["2027-03-05", ["hs"], "12:30 Dismissal"],
+-  ["2027-03-17", ["all"], "Late Arrival"],
+-  ["2027-03-18", ["ms"], "Community Day"],
+-  ["2027-03-18", ["hs"], "Community Day"],
+-  ["2027-03-22", ["ls"], "4th Grade Play"],
+-  ["2027-03-23", ["ls"], "Passport Club Testing"],
+-  ["2027-03-23", ["ls"], "4th Grade Play"],
+-  ["2027-03-24", ["all"], "Late Arrival"],
+-  ["2027-03-24", ["all"], "Family Night"],
+-  ["2027-03-24", ["ms"], "CogAT Testing (5th Grade)"],
+- 
+-  ["2027-03-25", ["all"], "No Late Arrival"],
+-  ["2027-03-25", ["ls"], "Grandparents Day"],
+-  ["2027-03-25", ["ls"], "Noon Dismissal"],
+-  ["2027-03-25", ["ms"], "Noon Dismissal"],
+-  ["2027-03-25", ["hs"], "12:30 Dismissal"],
+-
+-  ["2027-03-30", ["ls"], "Spring Enrichment Begins"],
+-
+-  ["2027-03-31", ["all"], "Late Arrival"],
+-
+-  ["2027-04-01", ["hs"], "Spring Play"],
+-
+-  ["2027-04-02", ["ms"], "Pep Rally"],
+-  ["2027-04-02", ["ms"], "5th & 6th Grade Spring Social"],
+-  ["2027-04-02", ["hs"], "Spring Play"],
+-
+-  ["2027-04-03", ["all"], "Admissions Decisions Released"],
+-  ["2027-04-03", ["hs"], "Spring Play"],
+-
+-  ["2027-04-05", ["ls"], "CogAT Testing (3rd)"],
+-  ["2027-04-06", ["ls"], "CogAT Testing (3rd)"],
+-
+-  ["2027-04-07", ["all"], "Late Arrival"],
+-
+-  ["2027-04-08", ["ms"], "Visual Arts Exhibit"],
+-  ["2027-04-08", ["hs"], "Visual Arts Exhibit"],
+-  ["2027-04-08", ["all"], "Fine Arts Circle of Honor"],
+-
+-  ["2027-04-09", ["ls"], "Mother & Son Game Night"],
+-  ["2027-04-09", ["ms"], "Field Day"],
+-  ["2027-04-09", ["ms"], "Third Grading Period Ends"],
+-  ["2027-04-09", ["hs"], "Third Grading Period Ends"],
+-
+-  ["2027-04-10", ["hs"], "ACT on Campus"],
+-  ["2027-04-10", ["hs"], "Prom"],
+-
+-  ["2027-04-13", ["all"], "Admissions New Student Contracts Due"],
+-  ["2027-04-13", ["ls"], "Passport Club Testing"],
+-
+-  ["2027-04-14", ["all"], "Late Arrival"],
+-
+-  ["2027-04-16", ["hs"], "Spring Chorus Concert"],
+-
+-  ["2027-04-20", ["all"], "New Families Look Ahead Night"],
+-  ["2027-04-20", ["ms"], "Rising 5th Grade Look Ahead Night"],
+-  ["2027-04-20", ["ls"], "Rising 4th Grade Look Ahead Night"],
+-
+-  ["2027-04-21", ["all"], "Late Arrival"],
+-
+-  ["2027-04-22", ["ls"], "CogAT Parent Meeting (3rd & 5th)"],
+-
+-  ["2027-04-23", ["all"], "Artist Market"],
+-  ["2027-04-24", ["all"], "Artist Market"],
+-
+-  ["2027-04-27", ["hs"], "Spring Band Concert"],
+-
+-  ["2027-04-28", ["all"], "Late Arrival"],
+-
+-  ["2027-04-29", ["ms"], "Spring Musical"],
+-  ["2027-04-29", ["hs"], "Senior Honors Day"],
+-
+-  ["2027-04-30", ["ms"], "Spring Musical"],
+-  ["2027-04-30", ["hs"], "Senior Chapel"],
+-
+-  ["2027-05-01", ["hs"], "SAT on Campus"],
+-  ["2027-05-01", ["ms"], "Spring Musical"],
+-
+-  ["2027-05-03", ["hs"], "AP Exams"],
+-  ["2027-05-03", ["hs"], "Senior Science Exam"],
+-
+-  ["2027-05-04", ["ls"], "Passport Club Testing"],
+-  ["2027-05-04", ["hs"], "AP Exams"],
+-  ["2027-05-04", ["hs"], "Senior English Exam"],
+-
+-  ["2027-05-05", ["all"], "Late Arrival"],
+-  ["2027-05-05", ["hs"], "AP Exams"],
+-  ["2027-05-05", ["hs"], "Senior Math / Conflict Exam"],
+-
+-  ["2027-05-06", ["all"], "All School Chapel"],
+-  ["2027-05-06", ["ms"], "Band Spring Concert"],
+-  ["2027-05-06", ["hs"], "AP Exams"],
+-  ["2027-05-06", ["hs"], "Senior Conflict Exam"],
+-
+-  ["2027-05-07", ["ls"], "Morning with Mom"],
+-  ["2027-05-07", ["ms"], "House Celebration"],
+-  ["2027-05-07", ["hs"], "AP Exams"],
+-
+-  ["2027-05-10", ["ms"], "Chorus Spring Concert"],
+-  ["2027-05-10", ["hs"], "AP Exams"],
+-  
+-  ["2027-05-11", ["ms"], "7th & 8th Grade Exam Review Day"],
+-  ["2027-05-11", ["hs"], "AP Exams"],
+-  
+-  ["2027-05-12", ["all"], "Late Arrival"],
+-  ["2027-05-12", ["ls"], "2nd Grade Play"],
+-  ["2027-05-12", ["ms"], "7th & 8th Grade Exam Review Day"],
+-  ["2027-05-12", ["hs"], "AP Exams"],
+-
+-  ["2027-05-13", ["ls"], "World Market Day"],
+-  ["2027-05-13", ["ms"], "7th & 8th Grade Exam Review Day"],
+-  ["2027-05-13", ["ms"], "8th Grade Chapel"],
+-  ["2027-05-13", ["hs"], "AP Exams"],
+-
+-  ["2027-05-14", ["ls"], "Fine Arts Day"],
+-  ["2027-05-14", ["ls"], "Talent Show"],
+-  ["2027-05-14", ["ls"], "Third Grading Period Ends"],
+-  ["2027-05-14", ["ms"], "7th & 8th Grade Exam Review Day"],
+-  ["2027-05-14", ["ms"], "Honors Day"],
+-  ["2027-05-14", ["hs"], "AP Exams"],
+-  ["2027-05-14", ["hs"], "Honors Day"],
+-  ["2027-05-14", ["hs"], "1:10 Dismissal"],
+-
+-  ["2027-05-16", ["hs"], "Senior Trip"],
+-
+-  ["2027-05-17", ["all"], "Late Arrival"],
+-  ["2027-05-17", ["ms"], "7th & 8th Grade Math Exam"],
+-  ["2027-05-17", ["hs"], "Drop / Add"],
+-  ["2027-05-17", ["hs"], "Senior Trip"],
+-
+-  ["2027-05-18", ["all"], "Late Arrival"],
+-  ["2027-05-18", ["ls"], "Field Day"],
+-  ["2027-05-18", ["ls"], "End of Year Parties"],
+-  ["2027-05-18", ["ms"], "7th & 8th Grade Science Exam"],
+-  ["2027-05-18", ["hs"], "Drop / Add"],
+-  ["2027-05-18", ["hs"], "Senior Trip"],
+-
+-  ["2027-05-19", ["all"], "Late Arrival"],
+-  ["2027-05-19", ["ls"], "Move Up Day"],
+-  ["2027-05-19", ["ms"], "7th & 8th Grade Social Science Exam"],
+-  ["2027-05-19", ["hs"], "Drop / Add"],
+-  ["2027-05-19", ["hs"], "Senior Trip"],
+-
+-  ["2027-05-20", ["ms"], "Late Arrival"],
+-  ["2027-05-20", ["hs"], "Late Arrival"],
+-  ["2027-05-20", ["ms"], "5th and 6th End of Year Parties"],
+-  ["2027-05-20", ["ms"], "5th and 6th 10:30 Dismissal"],
+-  ["2027-05-20", ["ms"], "7th & 8th Grade English Exam"],
+-  ["2027-05-20", ["hs"], "Drop / Add"],
+-
+-  ["2027-05-21", ["hs"], "Late Arrival"],
+-  ["2027-05-21", ["ms"], "2nd Semester Grading Period Ends"],
+-  ["2027-05-21", ["hs"], "2nd Semester Grading Period Ends"],
+-  ["2027-05-21", ["hs"], "Drop / Add"],
+-  ["2027-05-21", ["all"], "Baccalaureate"],
+-];
++// School events now come from the imported calendar (stored as normal special days).
++const STATIC_SPECIAL_DAY_ROWS = [];
+ 
+ const exportTitle =
+   document.querySelector(".header-center h1")?.textContent?.trim() ||
+@@ -5545,34 +4374,8 @@
+   return groupByMonth(getCurrentRotationData());
+ }
+ 
+-const DIVISION_SPECIFIC_PERIOD_OVERRIDES = {
+-  hs: {
+-    sem1: {
+-      "2026-12-10": [7, 1, 2, 3],
+-      "2026-12-11": [4, 5, 6],
+-      "2027-03-05": [3, 4, 5],
+-      "2027-03-25": [6, 7, 1, 2],
+-      "2027-05-14": [2, 3, 4, 5, 6, 7, 1],
+-    },
+-    sem2: {
+-
+-    }
+-  },
+-  ms: { sem1: {
+-    "2026-08-12": [1, 2, 3, 4, 5, 6, 7],
+-    "2026-09-10": [3, 4, 5],
+-    "2026-09-11": [6, 7, 1],
+-    "2026-12-16": [1, 2, 3, 4, 5, 6, 7],
+-    "2027-05-19": [1, 2, 3, 4, 5, 6, 7],
+-  }, sem2: {} },
+-  ls: { sem1: {}, sem2: {} }
+-};
+-
+-const DIVISION_SPECIFIC_ALL_PERIOD_DATES = {
+-  hs: { sem1: new Set(["2026-08-13"]), sem2: new Set() },
+-  ms: { sem1: new Set(), sem2: new Set() },
+-  ls: { sem1: new Set(), sem2: new Set() }
+-};
++const DIVISION_SPECIFIC_PERIOD_OVERRIDES = {};
++const DIVISION_SPECIFIC_ALL_PERIOD_DATES = {};
+ 
+ const LS_SPECIAL_DAYS_KEY = "-specialDays";
+ const LS_HIDDEN_SPECIAL_ENTRIES_KEY = "-hiddenSpecialEntries";
+@@ -5660,7 +4463,7 @@
+     '[name="division"], [name="semester"], #divisionSelect, #semesterSelect, #divisionSelector, #semesterSelector, .division-toggle'
+   ).forEach(el => {
+     const row = el.closest("label, .control-row, .toolbar-group") || el;
+-    row.style.display = "";
++    row.style.display = "none"; // generic planner: no divisions/semesters
+   });
+ 
+   if (typeof updateCustomCalendarSectionVisibility === "function") {
+@@ -5708,8 +4511,9 @@
+ 
+   const usingBuiltIn = !activePackId || activePackId === "builtin";
+ 
+-  // Hide whenever Wesleyan built-in calendar is active.
+-  section.style.display = usingBuiltIn ? "none" : "";
++  // Generic planner: always available (it is the only kind of calendar).
++  section.style.display = "";
++  void usingBuiltIn;
+ }
+ 
+ /** Rows safe to persist (never static/generated). */
+@@ -7282,7 +6086,9 @@
+ 
+     const schoolDay = getRotationDayByDate(iso) || dayMap[iso] || null;
+     const override = typeof getCustomDay === "function" ? getCustomDay(iso) : null;
+-    const isOff = !!(override && String(override.letter).toUpperCase() === "OFF");
++    const isOff =
++      !!(override && String(override.letter).toUpperCase() === "OFF") ||
++      String(schoolDay?.letter || "").toUpperCase() === "OFF";
+ 
+     const rawLetter = schoolDay?.letter || "";
+     const isNoSchool =
+@@ -7317,7 +6123,7 @@
+     const monthAbbrev = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][month - 1];
+     const cleanDate = `${monthAbbrev}. ${dayNum}`;
+     const codedLabel =
+-      !isOff && !isNoSchool && letter && normalizeLetter(letter)
++      !isOff && !isNoSchool && letter && normalizeLetter(letter) && getActiveLetters().length > 1
+         ? ` - ${letter}`
+         : "";
+ 
+@@ -7351,7 +6157,7 @@
+     if (isOff) {
+       const offBadge = document.createElement("span");
+       offBadge.className = "status-badge off-badge";
+-      const label = (override?.label || "").trim();
++      const label = (override?.label || schoolDay?.label || "").trim();
+       offBadge.innerHTML = label
+         ? `NO SCHOOL<br><span class="off-badge-sub">${label}</span>`
+         : `NO SCHOOL`;
+@@ -7584,7 +6390,9 @@
+ function buildDaySummaryData(iso) {
+   const schoolDay = getRotationDayByDate(iso);
+   const override = typeof getCustomDay === "function" ? getCustomDay(iso) : null;
+-  const isOff = !!(override && String(override.letter).toUpperCase() === "OFF");
++  const isOff =
++    !!(override && String(override.letter).toUpperCase() === "OFF") ||
++    String(schoolDay?.letter || "").toUpperCase() === "OFF";
+   const rawLetter = schoolDay?.letter || "";
+   const isNoSchool = isOff ||
+     /no school|holiday|break|labor day|thanksgiving|christmas/i.test(String(rawLetter)) ||
+@@ -7592,7 +6400,7 @@
+   const letter = isOff ? "OFF" : rawLetter;
+ 
+   let noSchoolLabel = "";
+-  if (isOff) noSchoolLabel = (override?.label || "").trim();
++  if (isOff) noSchoolLabel = (override?.label || schoolDay?.label || "").trim();
+   else if (isNoSchool) noSchoolLabel = String(rawLetter).replace(/[-–—]/g," ").replace(/\bno school\b/gi,"").replace(/\s+/g," ").trim();
+ 
+   const dateObj = new Date(iso + "T12:00:00");
+@@ -8387,6 +7195,7 @@
+   const override = typeof getCustomDay === "function" ? getCustomDay(iso) : null;
+   if (override && String(override.letter).toUpperCase() === "OFF") return false;
+   const rawLetter = schoolDay.letter || "";
++  if (String(rawLetter).toUpperCase() === "OFF") return false;
+   if (/no school|holiday|break/i.test(String(rawLetter))) return false;
+   return true;
+ }
+@@ -11536,7 +10345,7 @@
+   }
+ }
+ 
+-const EXTERNAL_BACKUP_DB_NAME = "plannerExternalBackupDb";
++const EXTERNAL_BACKUP_DB_NAME = "unitPacerExternalBackupDb";
+ const EXTERNAL_BACKUP_STORE_NAME = "settings";
+ const EXTERNAL_BACKUP_HANDLE_KEY = "autoBackupFileHandle";
+ 
+@@ -11659,7 +10468,7 @@
+ 
+   try {
+     const handle = await window.showSaveFilePicker({
+-      suggestedName: "Wesleyan 26-27 Planner.html",
++      suggestedName: "Unit Pacer Planner.html",
+       types: [{
+         description: "HTML calendar",
+         accept: { "text/html": [".html", ".htm"] }
+@@ -12808,7 +11617,7 @@
+           }
+ 
+           if (typeof closeHelp === "function") closeHelp();
+-          showProfileToast?.("Default Wesleyan calendar applied.");
++          showProfileToast?.("Calendar applied.");
+           return;
+         }
+ 
+@@ -14991,80 +13800,15 @@
+           <h2>Welcome to Your Digital Planner</h2>
+           <p>This tool helps you plan classes with rotation days, units, notes, and assessments — all saved locally in your browser.</p>
+           <div class="new-user-quickstart">
+-            <h3 style="margin:0 0 6px; font-size:1rem;">New User Quick Start</h3>
+-            <label>Profile to use (optional)
+-              <select id="newUserProfileSelect">
+-                <option value="">Keep current profile</option>
+-              </select>
+-            </label>
+-            <p class="small" style="margin:0;">Do you want to start with the default Wesleyan calendar?</p>
+-            <div style="display:flex; gap:12px; margin-top:8px; flex-wrap:wrap;">
+-              <label><input type="radio" name="newUserCalendarType" value="default" checked> Yes, use default Wesleyan</label>
+-              <label><input type="radio" name="newUserCalendarType" value="custom"> No, I need a custom calendar</label>
+-            </div>
+-
+-            <div id="newUserDefaultQuestions" class="new-user-branch">
+-              <div class="new-user-grid">
+-                <label>Division
+-                  <select id="newUserDivision">
+-                    <option value="hs">High School</option>
+-                    <option value="ms">Middle School</option>
+-                    <option value="ls">Lower School</option>
+-                    <option value="other">Other</option>
+-                  </select>
+-                </label>
+-                <label>Starting semester
+-                  <select id="newUserSemester">
+-                    <option value="sem1">1st Semester</option>
+-                    <option value="sem2">2nd Semester</option>
+-                  </select>
+-                </label>
+-              </div>
+-            </div>
+-
+-            <div id="newUserCustomQuestions" class="new-user-branch" style="display:none;">
+-              <div class="small">Enter the same setup details used in the Custom Calendar sidebar section.</div>
+-              <div class="new-user-grid">
+-                <label>Division
+-                  <select id="newUserCustomDivision">
+-                    <option value="hs">High School</option>
+-                    <option value="ms">Middle School</option>
+-                    <option value="ls">Lower School</option>
+-                    <option value="other">Other</option>
+-                  </select>
+-                </label>
+-                <label>Calendar name
+-                  <input id="newUserPackName" type="text" placeholder="School Year 2026-27">
+-                </label>
+-                <label>Start date
+-                  <input id="newUserPackStart" type="date">
+-                </label>
+-                <label>End date
+-                  <input id="newUserPackEnd" type="date">
+-                </label>
+-                <label>Letters
+-                  <input id="newUserPackLetters" type="text" value="A,B,C,D,E,F,G">
+-                </label>
+-                <label>Periods per day
+-                  <input id="newUserPackPeriodCount" type="number" min="1" max="12" step="1" value="7">
+-                </label>
+-                <label style="display:flex; align-items:center; gap:6px; margin-top:20px;">
+-                  <input id="newUserPackSkipWeekends" type="checkbox" checked>
+-                  Skip weekends in cycle
+-                </label>
+-              </div>
+-            </div>
+-
+-            <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+-              <button type="button" id="applyNewUserSetupBtn">Apply answers</button>
+-              <span class="small">This pre-fills settings and opens the right setup path.</span>
+-            </div>
++            <h3 style="margin:0 0 6px; font-size:1rem;">New here?</h3>
++            <p class="small" style="margin:0 0 8px;">The setup wizard imports your school calendar, builds your class schedule, and sets up the classes you teach.</p>
++            <button type="button" id="openSetupWizardFromHelpBtn">🏫 Run setup wizard</button>
+           </div>
+           <ul>
+             <li>Enter class names in the left sidebar</li>
+             <li>Create units with length and daily topics</li>
+             <li>Click any day on the calendar to add notes or mark tests</li>
+-            <li>Switch divisions / semesters using the header selector</li>
++            <li>Use <strong>🏫 School Setup</strong> in the sidebar to re-run setup or update school calendar events</li>
+             <li>Use <strong>Backup / Restore</strong> or Profiles to keep your work safe</li>
+           </ul>
+           
+@@ -15135,10 +13879,10 @@
+         <section class="help-section" data-help-section="backup">
+           <h2>Backup & Profiles</h2>
+           <ul>
+-            <li><strong>Backup Data</strong> — downloads a .json file of the current division</li>
++            <li><strong>Backup Data</strong> — downloads a .json file of your planner</li>
+             <li><strong>Restore Data</strong> — loads a previous backup</li>
+             <li>Auto-backup runs every 5 minutes (see the status badge in the bottom-right)</li>
+-            <li>Profiles let you keep separate setups (different teachers, years, or divisions)</li>
++            <li>Profiles let you keep separate setups (different teachers, years, or schools)</li>
+             <li>Switch profiles from the header dropdown</li>
+           </ul>
+         </section>
+@@ -15159,5 +13903,7 @@
+ <div id="profileToast"></div>
+ 
+ <script src="https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js"></script>
++<link rel="stylesheet" href="setup-wizard.css">
++<script src="setup-wizard.js"></script>
+ </body>
+ </html>
+\ No newline at end of file
